@@ -1,0 +1,61 @@
+# WhatsApp Export Parsing
+
+Notes for reading a WhatsApp "Export chat" file.
+
+## What the export contains
+
+- A ZIP with `_chat.txt` (or `WhatsApp Chat with <name>.txt`) and optionally media files.
+- If the user exported "Without media", only the `.txt` file is present.
+
+## Line formats
+
+The format depends on the phone's OS, language, and date settings.
+
+**Android (common)**
+```
+12/03/2024, 9:41 PM - Name: message text
+12/03/2024, 21:41 - Name: message text
+```
+
+**iOS (common)**
+```
+[12/03/2024, 21:41:05] Name: message text
+```
+
+Arabic-language exports may use Arabic-Indic digits (٠١٢٣) and `ص` / `م` for AM / PM. Normalize them before parsing.
+
+## Parsing steps
+
+1. Read the file as UTF-8 (try `utf-8-sig` if there is a BOM).
+2. Detect the format from the first 20 lines, then pick one regex:
+   - Android: `^(\d{1,2}/\d{1,2}/\d{2,4}),? (\d{1,2}:\d{2}(?::\d{2})?(?:\s?[APap][Mm]|\s?[صم])?) - (.*?): (.*)$`
+   - iOS: `^\[(\d{1,2}/\d{1,2}/\d{2,4}),? (\d{1,2}:\d{2}(?::\d{2})?)\] (.*?): (.*)$`
+3. A line that does **not** match the pattern is a continuation of the previous message (multi-line message). Append it to the previous message.
+4. Lines with a timestamp but no `Name:` part are **system messages** (joined, left, changed subject, security code changed). Keep them separately; do not count them as messages.
+5. Decide the date order (DD/MM vs MM/DD) by checking whether any value in the first position is greater than 12. If it is ambiguous, say so in the summary.
+
+## Special markers to handle
+
+| Marker | Meaning |
+|--------|---------|
+| `<Media omitted>` / `<تم استبعاد الوسائط>` | Media was not exported |
+| `image omitted`, `video omitted`, `sticker omitted` | Same, by type |
+| `This message was deleted` / `تم حذف هذه الرسالة` | Deleted message |
+| `<This message was edited>` | Edited message |
+| Voice notes (`.opus`) | Cannot be summarized unless transcribed |
+
+## Useful stats to compute
+
+- Number of messages, participants, and date range.
+- Messages per participant and most active days.
+- Links shared (list them, do not open them unless asked).
+- Questions with no reply.
+
+## Large chats
+
+For chats over roughly 2,000 messages: split by day or by week, summarize each part, then merge into one summary with a timeline.
+
+## Privacy
+
+- Mask phone numbers, bank details, and passwords before quoting.
+- Do not include real chat exports in this repository.
